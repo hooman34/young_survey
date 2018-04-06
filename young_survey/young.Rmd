@@ -1,0 +1,545 @@
+---
+title: "Daily accumulation of our traits."
+output: html_notebook
+---
+
+![](https://i.kinja-img.com/gawker-media/image/upload/s--_PEXOaZd--/c_scale,fl_progressive,q_80,w_800/z7uxszmnrjcdrcmfatpv.jpg)
+.
+
+.
+
+.
+
+ A group of students and their friends gather at a room. They all start filling out the questionaire in front of them. The questionaire is about their music, movie preferences, personal traits and opinions, phobias, spending habits, health habits, and personal information.
+
+ With the completed questionaires, a lot of things about the students can be known. Because age vary from 15 to 30, it is totally okay to generalize the sample as 'young people'. We can know movie/music preferences of young Slovakians. Or even their perticular weaknesses. However, the most interesting question for me is: will the perception of personal traits have influence on their perception of spending and health habits? If I think my self as two faced, will I try to save all the money I can? If I think I have many different hobbies and interests, will I think myself as having a healthy life style? Even though I don't know the actual cause of it, will I at least know the slightest relation?
+
+ Our personality and view on life has a great impact on our lives. Our daily thoughts and opinions accumulate and gradually form our life style and future. So it is important for us to keep track of our selves and predict the impact our thoughts will bring.
+
+.
+
+.
+
+.
+
+.
+
+Lets start by reading the data.
+```{r}
+suppressMessages(library(corrplot))
+suppressMessages(library(ggplot2))
+suppressMessages(library(dplyr))
+suppressWarnings(library(gridExtra))
+suppressWarnings(library(Amelia))
+suppressMessages(library(tidyr))
+suppressMessages(library(grid))
+suppressMessages(library(caret))
+suppressMessages(library(rlist))
+suppressWarnings(library(caTools))
+```
+
+```{r}
+columns = read.csv("columns.csv", header = T)
+response = read.csv("responses.csv", header = T)
+```
+```{r}
+head(response)
+```
+
+There are so many columns to consider, but I'm only interested in personality traits, health habits, and spending habits.
+
+I'll also keep the demographics to figure out the characteristics of the respondents.
+```{r}
+colnames(response)
+```
+
+health habit columns are 74, 75, 76
+personality trait columns are 77:133
+spending habit columns are 134:140
+personal information columns are 141:150
+.
+
+```{r}
+interested_cols = c(74:150)
+young = response[, interested_cols]
+colnames(young)
+```
+
+.
+
+.
+
+.
+
+.
+
+## Exploring our data
+
+First, empty columns could be distracting, so converting them into NA would be much cleaner.
+
+Change blank values into NA
+```{r}
+nas = function (x){
+  sum(is.na(x))
+}
+blank = function(x){
+  sum(x=="")
+}
+
+young[young==""] = NA
+
+a = apply(young, 2, nas)
+b = apply(na.omit(young), 2, blank)
+b[b != 0]
+```
+```{r}
+head(sort(a, decreasing = T))
+```
+The columns with the most NA is height and weight, followed by smoking. Maybe students were not willing to disclose their 'too' personal information. But they are only a minor problem compared to the whole data.
+
+.
+
+.
+
+.
+
+.
+
+#### Getting to know more about our data set
+
+```{r}
+p1 =ggplot(na.omit(young), aes(x=Age)) + geom_bar(fill = "#23b0db") + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(),
+panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+
+age = young %>% select(Age) %>% group_by(Age) %>% summarize(count = n()) %>% arrange(desc(count))
+age = tableGrob(as.data.frame(age))
+```
+
+```{r}
+grid.arrange(p1, head(age, 7), ncol=2)
+```
+
+The age is concentrated around 18 - 21. Slovakian secondary school students are from 15 to 19 years old, and univerty students start from 19. So, it could be said that the majority of the participants are university students who are in their early years, or secondary school students.
+
+```{r}
+p = function(x){
+  a = ggplot(na.omit(young), aes_string(x)) + geom_bar(fill="#23b0db") + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+  return(a)
+  }
+
+p2 = p("Height")
+
+p3 = p("Weight")
+
+p4 = p("Number.of.siblings")
+
+p5 = p("Gender")
+
+p6 = p("Left...right.handed") + scale_x_discrete(labels=c("left", "right"))
+
+p7 = p("Education") + scale_x_discrete(labels = c("Bachelor", "currently primary", "doctorate", "masters", "primary", "secondary")) + theme(axis.text.x = element_text(angle = 45))
+
+p8 = p("Only.child")
+
+p9 = p("Village...town")
+
+p10 = p("House...block.of.flats") + scale_x_discrete(labels = c("house", "flat"))
+```
+
+
+```{r}
+grid.arrange(p1, p2, p3, p4, nrow=2)
+```
+There are some outliers in Height, Weight, and number of siblings. I will check for outliers later on. Besides the outliers, there seems to be a nice distribution of heights.
+
+```{r}
+grid.arrange(p5, p6, p8, p9, p10, p7, nrow=2)
+```
+
+There is not much of a gender difference, but there are a lot of right handed people, which is the norm.
+
+City dwellers are twice as much, compared to people from the village. The data set is from Comenius University in Bratislava, and that's why there are so many city dwellers. The university's national rank is #1, and world rank is #637 according to CWUR(Center for World University Rankings) 2016. Bratislava is the capital of Slovakia, which makes sense that most students are from the city. 
+
+However, what does not make sense is that the study was done at a university stat class, but most of the participants indicated themselves as a secondary school student. My best guess is that the students from the university brought friends who were not attending university. 
+
+Here's a beautiful image of Bratislava to help you understand how it looks.
+
+
+![](https://static.sashe.sk/data/2016/02/21/photos/194645/c/c-N6432366_194645_20160221_78801.jpg)
+
+.
+
+.
+
+.
+
+.
+
+## outlier detection
+Because of the nature of the survey, only height, age, weight and num of siblings can conatin outliers.
+
+```{r}
+max_fun = function(x){
+  mean(x) + 2*sd(x)
+}
+min_fun = function(x){
+  mean(x) - 2*sd(x)
+}
+
+max_num = na.omit(young) %>% select(Height, Weight) %>% summarise_all(funs(max_fun))
+min_num = na.omit(young) %>% select(Height, Weight) %>% summarise_all(funs(min_fun))
+
+out = max_num
+out[2,] = min_num[1,]
+```
+
+Actual numbers of Outliers in height and weight
+```{r}
+young %>% select(Height, Weight) %>% filter(Height<out[2,1] | Height>out[1,1] | Weight<out[2,2] | Weight > out[1,2])
+```
+
+```{r}
+grid.arrange(p2 + geom_vline(xintercept=c(out[2,1], out[1,1]), linetype="dashed", size=1.2), p3 + geom_vline(xintercept=c(out[2,2], out[1,2]), linetype="dashed", size=1.2))
+```
+
+Store data set without outliers.
+```{r}
+young = young %>% filter(!(Height<out[2,1] | Height>out[1,1] | Weight<out[2,2] | Weight > out[1,2])) %>% arrange((Height), (Weight))
+```
+
+When I first saw the numbers, I thought they were not as deviated as I expected. Yeah,they are actual numbers from the participants! However, for the sake of clean data, I would exclude them. I will keep the data sets within 95% interval. That is, two standard deviations from the mean to each side.
+
+.
+
+.
+
+.
+
+.
+
+## Getting to know about our target variable
+```{r}
+spending_col = colnames(young[,61:67])
+a = na.omit(young) %>% select(spending_col, Healthy.eating) %>% summarise_all(funs(mean))
+b = gather(a, Behavior, Avg)
+p13 = ggplot(b, aes(x=Behavior, y=Avg)) + geom_bar(stat = "identity", fill="#23b0db") +coord_flip(ylim=c(2,4)) + geom_hline(yintercept=3, linetype="dashed", size=1.2) + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"))
+
+p13
+```
+Among the spending habits, the ones that I am interestedin are fincne, and healthy.eathing.
+.
+
+.
+
+Change them into binary.
+```{r}
+young$Finances_new = as.numeric(young$Finances >= 3)
+young$Healthy.eating_new = as.numeric(young$Healthy.eating >= 3)
+```
+
+```{r}
+new_traits = c(4:34, 37:59)
+finance_cor = cor(na.omit(young)$Finances_new, na.omit(young)[, new_traits])
+health_cor = cor(na.omit(young)$Healthy.eating_new, na.omit(young)[, new_traits])
+finance_cor = gather(as.data.frame(finance_cor), traits, cor)
+finance_cor = finance_cor %>% filter(cor > 0.1 | cor < -0.1) %>% arrange(cor)
+health_cor = gather(as.data.frame(health_cor), traits, cor)
+health_cor = health_cor %>% filter(cor > 0.1 | cor < -0.1) %>% arrange(cor)
+
+p14 = ggplot(finance_cor, aes(x=reorder(traits, cor), y=cor))+ geom_bar(stat = "identity", fill="#23b0db") +coord_flip() + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + labs(x= "Traits") + ggtitle("Correlation - Saving")
+p15 = ggplot(health_cor, aes(x=reorder(traits, cor), y=cor))+ geom_bar(stat = "identity", fill="#23b0db") +coord_flip() + theme_bw() + theme(panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black")) + labs(x="Traits") + ggtitle("Correlation - Health")
+
+grid.arrange(p14, p15, ncol=2)
+```
+The strongest trait that has a correlation with saving is proioritising workload, thinking ahead, criminal damage, and getting up. Saving money requires self discipline, and it's the same for correlated traits too. Prioritising workload and thinking ahead relates to more self discipline. Having a hard time getting up and damaging things when angry relates to less self discipline.
+
+People who answered they have a healthy lifestyle also tends to answer themselves as working/studying in their spare time, prioritising workload and a reliable worker. Seems like having a healthy lifestyle also boils down to self control.
+
+One thing to note is that, they don't have high correlation with the target variable.
+.
+
+.
+Select traits that I want to see the difference of.
+
+.
+
+#### Differences of mean
+
+Difference of traits based on finance(saving all the money one can).
+```{r}
+finance = na.omit(young) %>% select(new_traits, Finances_new) %>% group_by(Finances_new) %>% summarize_all(mean)
+
+## selecting traits from the data set. traits that has diff more than 0.3, and less than 0.05
+select_traits = function(data, prob1 = 0.3, prob2 = 0.05) {
+  diff = data[1, ]- data[2, ]
+  trait_names = (gather(diff)[-1, ] %>% filter(value< -prob1 | value > prob1 | (-prob2 < value & value < prob2)) %>% arrange(value))
+  return(trait_names)
+}
+
+## the traits
+finance_traits = select_traits(finance)
+key = finance_traits$key
+value = round(finance_traits$value, 2)
+
+## full function, making the plots
+make = function(data, target, key, value){
+  plot = function(trait){
+  a = ggplot(data, aes_string(x=factor(target), y=trait, fill=target)) + geom_bar(stat = "identity") + theme_bw() + theme(axis.title.y=element_blank(), axis.title.x=element_blank(), panel.border = element_blank(), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.line = element_line(colour = "black"), legend.position = "none", plot.title = element_text(size = 10)) + coord_fixed(ylim = c(1.5, 5))
+    return(a)
+}
+  b = apply(data[, key], 2, plot)
+  
+  for (i in 1:length(key)){
+    b[[i]] = b[[i]] + ggtitle(key[i]) + annotate("text", x = 2, y=4.5, label = value[i])
+  }
+  return(b)
+}
+
+##
+finance_plots = make(finance, finance$Finances_new, key, value)
+
+for (i in 1:length(finance_plots)) {
+  assign(paste0("p", i+15), finance_plots[[i]])
+}
+```
+
+```{r}
+title = textGrob("1 for saving higher than avg, 0 for lower", gp=gpar(fontface="bold"))
+grid.arrange(p16, p17, p18, p19, p20, p21, p22, p23, p24, p25, ncol=5, bottom = title)
+```
+
+```{r}
+grid.arrange( p26, p27, p28, p29, p30, p31, p32, p33, p34, p35, ncol=5, bottom = title)
+```
+The overall mean of giving charity was the lowest amont the given traits, and also had very little difference between those who saved more and those who saved less. On the other hand, Compassion to animals(dont't like seeing animals suffer) among different group of savings did not differ much. Both group showed high discomfort at seeing animals suffer. Unpopularity('I will find fault in myself if people don't like me'), having good dreams, feeling lonely in life, and self-criticism(of regreting the decisions made) all showed little difference.
+
+The traits that most differs between groups are Prioritising worload, thinking ahead, getting up, and criminal damage(breaking things when mad). Interestingly, the common factor of these traits I can think of, is that they all need self-control. I'll do a t-test later, to see if those differences are statistically significant.
+.
+
+.
+
+.
+
+Difference of traits based on healthy life style (having a healthy life style).
+```{r}
+health = na.omit(young) %>% select(new_traits, Healthy.eating_new) %>% group_by(Healthy.eating_new) %>% summarize_all(mean)
+
+## the traits. traits that has diff more than 0.3, and less than 0.05
+health_traits = select_traits(health)
+key = health_traits$key
+value = round(health_traits$value, 2)
+
+##
+health_plots = make(health, health$Healthy.eating_new, key, value)
+
+for (i in 1:length(health_plots)) {
+  assign(paste0("p", i+35), health_plots[[i]])
+}
+
+```
+
+```{r}
+title = textGrob("1 healthy higher than avg, 0 for lower", gp=gpar(fontface="bold"))
+grid.arrange(p36, p37, p38, p39, p40, p41, p42, p43, p44, p45, p46, p47, ncol = 6, bottom = title)
+```
+
+```{r}
+grid.arrange(p48, p49, p50, p51, p52, p53, p54, p55, p56, p57, p58, ncol = 6, bottom = title)
+```
+And again, self-criticism(of regreting the decisions made) appears to have a high average regardless of group. Other traits with high average with little difference are; new environment(adapting to new environment), and funniess(always trying to be the funniest).
+
+Workaholism, prioritising workload, and writing notes showed the biggest difference between a group with healthy lifestyle, and an unhealthy lifestyle. These traits came out in both healthy life style AND saving money. This means doing a significance test is a must.
+
+.
+
+.
+
+#### t test
+```{r}
+health_list = c("Self.criticism", "New.environment", "Funniness", "Workaholism", "Prioritising.workload", "Writing.notes")
+saving_list = c("Compassion.to.animals", "Unpopularity", "Dreams", "Loneliness", "Self.criticism", "Prioritising.workload", "Thinking.ahead", "Getting.up", "Criminal.damage")
+
+dotest = function(trait, ls){
+  df = data.frame()
+  for (i in 1:length(ls)){
+    a <- na.omit(young)[, trait] == 1
+    one = na.omit(young)[a, ][, ls[i]]
+    zero = na.omit(young)[!a, ][, ls[i]]
+    test = t.test(one, zero)
+    df[i, 1] = ls[i]
+    df[i, 2] = mean(one, na.rm = T) - mean(zero, na.rm = T)
+    df[i, 3] = test$p.value
+  }
+  return(df)
+}
+
+health_df = dotest("Healthy.eating_new", health_list)
+finance_df = dotest("Finances_new", saving_list)
+```
+
+```{r}
+health_list = c("Self.criticism", "New.environment", "Funniness", "Workaholism", "Prioritising.workload", "Writing.notes")
+saving_list = c("Compassion.to.animals", "Unpopularity", "Dreams", "Loneliness", "Self.criticism", "Prioritising.workload", "Thinking.ahead", "Getting.up", "Criminal.damage")
+
+annot = function(data, plt, x){
+  an1 = annotate('text', x=1, y= 4.95, label="p-val")
+  an2 = annotate("text", x=2, y=4.95, label="Diff")
+  an3 = annotate("text", x=1, y=4.5, label = round(data$V3[x], 3), color=ifelse(round(data$V3[x], 3)<0.05, "#23b0db", "#ce1235") )
+  plt = plt + an1 + an2 + an3
+  return(plt)
+}
+```
+
+t-test on saving money
+```{r}
+title = textGrob("Saving: Red if do not reject null, Blue if reject null", gp=gpar(fontface="bold"))
+grid.arrange(annot(finance_df, p30, 1), annot(finance_df, p25, 2), annot(finance_df, p28, 3), annot(finance_df, p27, 4), annot(finance_df, p26, 5), annot(finance_df, p16, 6), annot(finance_df, p17, 7), annot(finance_df, p34, 8), annot(finance_df, p35, 9), ncol=5, bottom = title)
+```
+
+The null hypothesis here, is that there are no difference of mean between two groups, and the alternative hypothesis is that there is a difference. On the graph, p-values in red indicates that I cannot reject the null hypothesis. This means, I cannot say that there is a difference of mean between two groups. The traits in the top line does not show a meaningful difference according to saving money. Whether you save money or not, they are common traits! 
+
+Overall, both groups feel highly discomfort at watching animals suffer, and regret their past decisions, but does not feel lonely that much.
+
+
+However, prioritising workload, thinking ahead, getting up, criminal damage all seems to have a meaningful difference. The group that saves more, prioritises workload, thinks ahead, easily gets up, and shows less violence when mad, compared to the other group.
+
+.
+
+.
+
+.
+
+t-test on healty lifestyle
+```{r}
+title = textGrob("Health: Red if do not reject null, Blue if reject null", gp=gpar(fontface="bold"))
+grid.arrange(annot(health_df, p50, 1), annot(health_df, p53, 2), annot(health_df, p54, 3), annot(health_df, p36, 4), annot(health_df, p37, 5), annot(health_df, p38, 6), ncol=3, bottom = title)
+```
+Regretting the decisions made in the past(self-criticism) showed no difference between money saving, and it also showed no difference with respect to healthy life style. Adjusting to new environments, and trying to be the funniest one in the group showed no difference too. One thing interesting here, is that self criticism was common regardless of saving money, and healthy life style! In both of the t-tests, they showed an average higher than 3, and little difference between groups.
+
+The traits in the bottom line are the ones that show significant difference. As it did in the saving money t-test, prioritising workload is higher in the group with healthy life style.
+
+Again, I think this all boils down to self-control, and this time I can have more confidence. Saving, and having a healthy life style both need self discipline. Those who are in the 'higher than average' group have higher scores in the traits that require self-control. Those traits are the ones in the bottom lines. This could also mean something bigger. Can I generalize this result? Since prioritising worload appears in both t-tests, can I say that the more self-discipline you have, the more you will prioritise workload? Generalization, however, is dangerous, and hard to figure out. So I'll stop here.
+
+.
+
+.
+
+.
+
+.
+
+## logistic regression
+
+.
+
+####Logistic regression on saving money
+```{r}
+young1 = scale(young[, c(new_traits,62:71)])
+young1 = data.frame(young1)
+young1$Finances_new = young$Finances_new
+young1$Healthy.eating_new = young$Healthy.eating_new
+
+# split into train and test.
+set.seed(123)
+index = sample.split(young1$Finances_new, SplitRatio = 0.7)
+test = subset(young1, index == F)
+train = subset(young1, index == T)
+```
+
+```{r}
+# train model
+young_log = glm(Finances_new~., data = train[,-66], family = binomial)
+young_probs = predict(young_log, test, type = "response")
+young_pred = rep("0", length(test))
+young_pred[young_probs > .5] <- 1
+con = confusionMatrix(young_pred, test$Finances_new, positive = "1")
+con$table
+```
+The accuracy of our model is 0.7243243. This can be calculated by dividing the sum of true positives and true negatives by the total number. That is, (4+130)/(41+10+4+130). The accuracy is not that high since it's a simple model.
+
+```{r}
+# the coefficients and variable names that are significant.
+extract = function(data){
+  data = data.frame(summary(young_log)$coefficients[,c(1,4)])
+  data = subset(data, Pr...z.. < 0.05)
+  colnames(data) = c("Estimate", "pvalue")
+  data$var = row.names.data.frame(data)
+  data = data[-1,]
+  return(data)
+}
+coef = extract(data)
+```
+
+```{r}
+coef_plot = function(data){
+  data$var = factor(data$var, levels = data$var[order(-data$Estimate)])
+  plt = ggplot(data, aes(x = var, y=Estimate)) + geom_segment(aes(x = var, xend=var, y=Estimate, yend=0), color = "#255a77", size = 1.5) + geom_point(color = "#255a77", size=4.5) + coord_flip() + geom_hline(yintercept = 0, linetype="solid", color="#255a77", size = 1.05) + labs(x="Variables", y="Coefficient")
+  return(plt)
+}
+
+p59 = coef_plot(coef)
+p59 + ggtitle("Variables with p-values < 0.05")
+```
+There are some interesting facts here. When I did the t-test on saving money, prioritising workload, thinking ahead, getting up, and criminal damage had meaningful differences. People who saved more than average tend to prioritise work more, get up easily, think ahead, and do less damage when they are angry. 
+
+The result of the logistic regression also shows some similar insights! A unit increase of priotirising workoad increases the probability of being a money saver by more than 0.6. To be exact, exp(0.6444828) = 1.905002. That is, 190.5002% ! Also, a unit increase of getting up means exp(-0.3816751) = 68.27168% more of being a money saver.
+
+Other factors that increased the probability of being a money saver were worrying about health(health), waiting, taking time to make decisions, giving charity..etc. On the other hand, if you have many friends, it's more likely that you fall into the category of not saving money than average. It's the same with spending on entertainment and looks.
+
+.
+
+.
+
+#### Logistic regression on healthy life style
+```{r}
+# train model
+young_log = glm(Healthy.eating_new~., data = train[,-65], family = binomial)
+young_probs = predict(young_log, test, type = "response")
+young_pred = rep("0", length(test))
+young_pred[young_probs > .5] <- 1
+con = confusionMatrix(young_pred, test$Healthy.eating_new, positive = "1")
+con$table
+```
+Accuracy: 82.94%
+
+It's better than the finance model!
+
+```{r}
+coef2 = extract(data)
+p60 = coef_plot(coef2)
+p60 + ggtitle("Variables with p-values < 0.05")
+```
+
+The more you spend on healthy eating and looks, you will more likely to feel yourself as a person with healthy life style.
+
+Contrary with the money saving model, healthey lifestyle model doesn't include the factors that I went through in the t-test. There might be other sub-factors that distinguishes the difference between groups.
+
+.
+
+.
+
+.
+
+.
+
+## Take-away message
+
+* Young people tend to regret their past decisions, regardless of saving money and having a healthy life style.
+* Young people who saves more than average, or thinks to have a healthy life style tends to prioritise workload than their counterparts.
+* If you have a hard time getting up, or hardly prioritise your workload, there is a high probability that you will perceive yourself as a person who saves less than average.
+* There are many factors that influence of being a money saver, but having more self-regulation might also be related somehow. This is because traits that require self-discipline influences in being a money saver.
+
+.
+
+.
+
+.
+
+.
+
+#### An upvote will be nice if you enjoyed reading my analysis :)
+#### Also, I'm always open to comments!
+
+.
+
+.
